@@ -1,0 +1,123 @@
+*&---------------------------------------------------------------------*
+*&      Form  SAVE_ZIP
+*&---------------------------------------------------------------------*
+*       Perform to compress files.
+*----------------------------------------------------------------------*
+*      -->P_LT_NAMES_FILES  table with file names to compress.
+*----------------------------------------------------------------------*
+form save_zip tables p_lt_names_files.
+
+  data: lv_fln type string.
+  
+  types: begin of bin_file,
+                  name type string,
+                  size type i,
+                  data type solix_tab,
+        end of bin_file.
+
+  data: lv_filename  type string,
+        wa_bindata         type bin_file,
+        it_bindata         type standard table of bin_file,
+        oref_zip           type ref to cl_abap_zip,
+        lv_zip_xstring     type xstring,
+        lv_xstring         type xstring,
+        lv_path            type string,
+        it_filetab         type filetable,
+        wa_filetab         type filetable,
+        ret_code           type i,
+        v_usr              type i,
+        v_zip_size         type i,
+        v_filesize         type i,
+        it_zip_bin_data    type standard table of raw255,
+        v_dest_filepath    type string.
+
+  create object oref_zip.
+
+  loop at p_lt_names_files into lv_path.
+
+    lv_filename = lv_path.
+	
+    clear wa_bindata.
+    cl_gui_frontend_services=>gui_upload(
+      exporting
+        filename                = lv_filename
+        filetype                = 'BIN'
+      importing
+        filelength              = wa_bindata-size
+      changing
+        data_tab                = wa_bindata-data ).
+
+    call function 'SO_SPLIT_FILE_AND_PATH'
+      exporting
+        full_name     = lv_filename
+      importing
+        stripped_name = wa_bindata-name
+      exceptions
+        x_error       = 1
+        others        = 2.
+    append wa_bindata to it_bindata.
+  endloop.
+
+  clear wa_bindata.
+  loop at it_bindata into wa_bindata.
+    call function 'SCMS_BINARY_TO_XSTRING'
+      exporting
+        input_length = wa_bindata-size
+      importing
+        buffer       = lv_xstring
+      tables
+        binary_tab   = wa_bindata-data.
+
+    oref_zip->add( name = wa_bindata-name
+                   content = lv_xstring ).
+    clear wa_bindata.
+  endloop.
+
+  lv_zip_xstring = oref_zip->save( ).
+
+  call function 'SCMS_XSTRING_TO_BINARY'
+    exporting
+      buffer        = lv_zip_xstring
+    importing
+      output_length = v_zip_size
+    tables
+      binary_tab    = it_zip_bin_data.
+
+  clear lv_fln.
+
+  " complete path + file name + .zip
+  concatenate p_fln '\' 'Extracted_' sy-datum '_' sy-uzeit '.zip' into lv_fln.
+
+  cl_gui_frontend_services=>gui_download(
+     exporting
+       bin_filesize              = v_zip_size
+       filename                  = lv_fln
+       filetype                  = 'BIN'
+     importing
+       filelength                = v_filesize
+     changing
+       data_tab                  = it_zip_bin_data ).
+
+	   
+   " delete files non compressed after compression.
+  data: code type i.
+  clear lv_path.
+  loop at p_lt_nomes_files into lv_path.
+
+    call method cl_gui_frontend_services=>file_delete
+      exporting
+        filename             = lv_path
+      changing
+        rc                   = code
+      exceptions
+        file_delete_failed   = 1
+        cntl_error           = 2
+        error_no_gui         = 3
+        file_not_found       = 4
+        access_denied        = 5
+        unknown_error        = 6
+        not_supported_by_gui = 7
+        wrong_parameter      = 8
+        others               = 9.
+  endloop.
+endform.                    " SAVE_ZIP
